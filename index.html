@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      background-color: #f5f5f5;
+    }
+    h1 { color: #222; margin-bottom: 5px; }
+    #status { font-size: 1.2rem; margin-bottom: 15px; font-weight: bold; color: #555; }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(15, 40px);
+      grid-template-rows: repeat(15, 40px);
+      gap: 1px;
+      background-color: #e4b673;
+      padding: 12px;
+      border: 3px solid #966b2d;
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+    }
+    .cell {
+      background-color: #e4b673;
+      border: 1px solid #cfa25f;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+    }
+    .stone {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+      animation: drop 0.15s ease-out;
+    }
+    @keyframes drop {
+      0% { transform: scale(1.3); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .black { background: radial-gradient(circle at 30% 30%, #444, #111); }
+    .white { background: radial-gradient(circle at 30% 30%, #fff, #bbb); }
+  </style>
+</head>
+<body>
+
+  <h1>AI 오목 챌린지</h1>
+  <div id="status">당신의 차례입니다 (흑돌)</div>
+  <div id="board"></div>
+
+  <script>
+    const size = 15;
+    const boardElement = document.getElementById('board');
+    const statusElement = document.getElementById('status');
+    
+    // 0: 빈칸, 1: 흑돌(유저), 2: 백돌(AI)
+    let boardState = Array.from({ length: size }, () => Array(size).fill(0));
+    let gameActive = true;
+
+    // 오목판 그리기
+    for (let r = 0; r < size; r++) {
+      for (let c = 0; c < size; c++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        cell.id = `cell-${r}-${c}`;
+        cell.addEventListener('click', () => handleMove(r, c));
+        boardElement.appendChild(cell);
+      }
+    }
+
+    function handleMove(r, c) {
+      if (!gameActive || boardState[r][c] !== 0) return;
+
+      // 1. 유저 턴 진행
+      boardState[r][c] = 1;
+      drawStone(r, c, 'black');
+      
+      if (checkWin(r, c, 1)) {
+        endGame("🎉 축하합니다! 당신이 승리했습니다!");
+        return;
+      }
+
+      // 2. AI 차례 전환 대기
+      gameActive = false;
+      statusElement.innerText = "AI가 생각 중입니다...";
+
+      // 3. 서버에 현재 판 상태 전달 후 AI 수 받아오기
+      google.script.run
+        .withSuccessHandler((aiMove) => {
+          if (!gameActive && boardState[aiMove.row][aiMove.col] === 0) {
+            boardState[aiMove.row][aiMove.col] = 2;
+            drawStone(aiMove.row, aiMove.col, 'white');
+
+            if (checkWin(aiMove.row, aiMove.col, 2)) {
+              endGame("🤖 AI가 승리했습니다! 다시 도전해보세요.");
+              return;
+            }
+
+            // 다시 유저 차례로
+            gameActive = true;
+            statusElement.innerText = "당신의 차례입니다 (흑돌)";
+          }
+        })
+        .getAiMove(boardState);
+    }
+
+    function drawStone(r, c, color) {
+      const cell = document.getElementById(`cell-${r}-${c}`);
+      const stone = document.createElement('div');
+      stone.classList.add('stone', color);
+      cell.appendChild(stone);
+    }
+
+    function endGame(message) {
+      gameActive = false;
+      statusElement.innerText = message;
+      setTimeout(() => alert(message), 100);
+    }
+
+    // 5목 체크 알고리즘 (놓은 돌 기준으로 4방향 검사)
+    function checkWin(r, c, color) {
+      const directions = [
+        [[0, 1], [0, -1]],  // 가로
+        [[1, 0], [-1, 0]],  // 세로
+        [[1, 1], [-1, -1]], // 우하향 대각선
+        [[1, -1], [-1, 1]]  // 우상향 대각선
+      ];
+
+      for (let i = 0; i < directions.length; i++) {
+        let count = 1; // 방금 놓은 돌 포함
+        
+        for (let j = 0; j < 2; j++) {
+          let dr = directions[i][j][0];
+          let dc = directions[i][j][1];
+          let nr = r + dr;
+          let nc = c + dc;
+
+          while (nr >= 0 && nr < size && nc >= 0 && nc < size && boardState[nr][nc] === color) {
+            count++;
+            nr += dr;
+            nc += dc;
+          }
+        }
+        if (count >= 5) return true; // 5개 이상 연속되면 승리
+      }
+      return false;
+    }
+  </script>
+</body>
+</html>
