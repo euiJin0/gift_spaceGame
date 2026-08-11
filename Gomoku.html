@@ -1,0 +1,139 @@
+/**
+ * 웹 앱 접속 시 오목 게임 화면(Index.html)을 렌더링하는 함수
+ */
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('Index')
+      .setTitle('오목 게임')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/**
+ * 프로 기사급 패턴 인지 알고리즘 엔진
+ * 가로, 세로, 대각선 6칸씩 스캔하여 오목의 핵심 패턴(열린4, 열린3, 사삼 등)을 찾아 가중치를 부여합니다.
+ */
+function getAiMove(boardState) {
+  const size = 15;
+  let scoreBoard = Array.from({ length: size }, () => Array(size).fill(0));
+  
+  // 탐색 방향 (가로, 세로, 우하 대각선, 우상 대각선)
+  const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
+  // 1. 전판 스캔을 통해 각 빈칸의 '패턴 가치' 점수화
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (boardState[r][c] !== 0) continue;
+
+      // 각 방향별로 패턴 조사
+      for (let [dr, dc] of directions) {
+        // AI(2)가 뒀을 때의 공격 패턴 점수
+        let aiPatternScore = evaluatePattern(boardState, r, c, dr, dc, 2);
+        // 유저(1)가 뒀을 때의 방어 패턴 점수
+        let userPatternScore = evaluatePattern(boardState, r, c, dr, dc, 1);
+
+        // 공격 점수 합산
+        scoreBoard[r][c] += aiPatternScore;
+        // 방어 점수 합산 (상대의 치명적인 공격은 내 공격보다 무조건 높게 방어하도록 가중치 조절)
+        scoreBoard[r][c] += userPatternScore * 0.9; 
+      }
+
+      // 포석 점수 (중앙 가산점: 초반 싸움을 유리하게 이끌기 위함)
+      let centerBonus = (7 - Math.abs(7 - r)) + (7 - Math.abs(7 - c));
+      scoreBoard[r][c] += centerBonus * 2;
+    }
+  }
+
+  // 2. 최고 점수를 가진 좌표 찾기
+  let maxScore = -1;
+  let bestMoves = [];
+
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      if (boardState[r][c] !== 0) continue;
+      
+      if (scoreBoard[r][c] > maxScore) {
+        maxScore = scoreBoard[r][c];
+        bestMoves = [{row: r, col: c}];
+      } else if (scoreBoard[r][c] === maxScore) {
+        bestMoves.push({row: r, col: c});
+      }
+    }
+  }
+
+  // 최선의 수 선택
+  if (bestMoves.length > 0) {
+    return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+  }
+  return {row: 7, col: 7};
+}
+
+/**
+ * 특정 위치에 돌을 놓는다고 가정하고, 앞뒤 4칸씩 총 9칸의 라인을 추출하여 프로급 오목 패턴을 정밀 분석하는 함수
+ */
+function evaluatePattern(board, r, c, dr, dc, color) {
+  let line = [];
+  const size = 15;
+  
+  // 중심(방금 둔 자리)을 기준으로 -4칸부터 +4칸까지 하나의 라인으로 추출
+  for (let i = -4; i <= 4; i++) {
+    let nr = r + dr * i;
+    let nc = c + dc * i;
+    
+    if (nr >= 0 && nr < size && nc >= 0 && nc < size) {
+      if (i === 0) {
+        line.push(color); // 내가 두려고 하는 돌 배치
+      } else {
+        line.push(board[nr][nc]);
+      }
+    } else {
+      line.push(-1); // 바둑판 바깥 벽은 -1로 처리
+    }
+  }
+
+  let lineStr = line.join('');
+  let score = 0;
+
+  // [오목 패턴 매칭 리스트 및 가중치]
+  
+  // 1. 오목 완성 (필승/절대방어)
+  if (lineStr.includes(Array(5).fill(color).join(''))) return 1000000;
+
+  // 2. 열린 4 (양쪽이 뚫린 연속 4개)
+  let open4 = "0" + Array(4).fill(color).join('') + "0";
+  if (lineStr.includes(open4)) return 500000;
+
+  // 3. 닫힌 4 / 끊긴 4 (한쪽이 막혔거나 빈칸이 낀 4개)
+  let closed4Patterns = [
+    "0" + Array(4).fill(color).join(''),
+    Array(4).fill(color).join('') + "0",
+    color + "0" + color + color + color,
+    color + color + "0" + color + color,
+    color + color + color + "0" + color
+  ];
+  for (let p of closed4Patterns) {
+    if (lineStr.includes(p)) score += 100000;
+  }
+
+  // 4. 열린 3 (양쪽이 뚫린 3개)
+  let open3Patterns = [
+    "0" + Array(3).fill(color).join('') + "0",
+    "0" + color + "0" + color + color + "0",
+    "0" + color + color + "0" + color + "0"
+  ];
+  for (let p of open3Patterns) {
+    if (lineStr.includes(p)) score += 50000;
+  }
+
+  // 5. 닫힌 3 (한쪽이 막힌 3개)
+  let closed3Patterns = [
+    "0" + Array(3).fill(color).join(''),
+    Array(3).fill(color).join('') + "0"
+  ];
+  for (let p of closed3Patterns) {
+    if (lineStr.includes(p)) score += 5000;
+  }
+
+  // 6. 열린 2 (빌드업 차단 및 공격 설계용)
+  if (lineStr.includes("0" + color + color + "0")) score += 500;
+
+  return score;
+}
